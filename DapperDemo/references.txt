@@ -1,0 +1,536 @@
+1) Create MVC project Named DapperDemo in .net core 7 vesion
+2) Add new item class library as new project named ServiceLayer
+3) Add New Folder Entities 
+			under Entities add class 
+			1) BaseEntity
+			   public abstract class BaseEntity{}
+			2) Product 
+			  public class Product : BaseEntity
+				{
+					public int Id { get; set; }
+					public string? Name { get; set; }
+					public decimal? Price { get; set; }
+					public int? Quantity { get; set; }
+				}
+4) Add BaseRepository class 	
+   public abstract class BaseRepository
+    {
+        private readonly IConfiguration _configuration;
+
+        protected BaseRepository(IConfiguration configuration)
+        {
+            _configuration = configuration;
+        }
+
+        protected IDbConnection CreateConnection()
+        {
+            return new SqlConnection(_configuration.GetConnectionString("DefaultConnection"));
+        }
+    }		
+
+6) ADD IRepository
+    public interface IRepository<T> where T : BaseEntity
+    {
+        Task<List<T>> GetAllAsync();
+        Task<T> GetByIdAsync(int id);
+        Task<int> CreateAsync(T entity);
+        Task<int> UpdateAsync(T entity);
+        Task<int> DeleteAsync(T entity);
+    }	
+	
+	
+7) Add services named 	ProductService
+public class ProductService : IProductService
+    {
+        private readonly IProductRepository _productRepository;
+
+        public ProductService(IProductRepository productRepository)
+        {
+            _productRepository = productRepository;
+        }
+
+        public async Task<List<Product>> GetAllProducts()
+        {
+            return await _productRepository.GetAllAsync();
+        }
+
+        public async Task<Product> GetProductById(int id)
+        {
+            return await _productRepository.GetByIdAsync(id);
+        }
+
+        public async Task<int> CreateProductAsync(Product product)
+        {
+            return await _productRepository.CreateAsync(product);
+        }
+
+        public async Task<int> UpdateProductAsync(Product product)
+        {
+            return await _productRepository.UpdateAsync(product);
+        }
+
+        public async Task<int> DeleteProductAsync(Product product)
+        {
+            return await _productRepository.DeleteAsync(product);
+        }
+    }
+	
+8) Add Interface IProductService 
+	  public interface IProductService
+    {
+        public Task<List<Product>> GetAllProducts();
+        public Task<Product> GetProductById(int id);
+        public Task<int> CreateProductAsync(Product product);
+        public Task<int> UpdateProductAsync(Product product);
+        public Task<int> DeleteProductAsync(Product product);
+    }
+9) Add interface IProductRepository 
+ 	   public interface IProductRepository : IRepository<Product>
+    {
+    }
+	
+10) Add class ProductRepository 	
+
+public class ProductRepository : BaseRepository, IProductRepository
+    {
+        public ProductRepository(IConfiguration configuration)
+            : base(configuration)
+        { }
+
+        public async Task<List<Product>> GetAllAsync()
+        {
+            try
+            {
+                var procedure = "spGetAllProducts @Flag='l'";
+                using (var connection = CreateConnection())
+                {
+                    return (await connection.QueryAsync<Product>(procedure)).ToList();
+                }
+            }
+            catch (Exception ex)
+            {
+                throw new Exception(ex.Message, ex);
+            }
+        }
+
+        public async Task<Product> GetByIdAsync(int id)
+        {
+            try
+            {
+                var query = "SELECT * FROM Product WHERE Id = @Id";
+
+                var parameters = new DynamicParameters();
+                parameters.Add("Id", id, DbType.Int32);
+
+                using (var connection = CreateConnection())
+                {
+                    return (await connection.QueryFirstOrDefaultAsync<Product>(query, parameters));
+                }
+            }
+            catch (Exception ex)
+            {
+                throw new Exception(ex.Message, ex);
+            }
+        }
+
+        public async Task<int> CreateAsync(Product entity)
+        {
+            try
+            {
+                string procedure = "spGetAllProducts ";
+
+               // var query = "INSERT INTO Product (Name, Price, Quantity) VALUES (@Name, @Price, @Quantity)";
+
+                var parameters = new DynamicParameters();
+                parameters.Add("Flag", "i", DbType.String);
+                parameters.Add("Name", entity.Name, DbType.String);
+                parameters.Add("Price", entity.Price, DbType.Decimal);
+                parameters.Add("Quantity", entity.Quantity, DbType.Int32);
+
+                using (var connection = CreateConnection())
+                {
+                    return await connection.ExecuteAsync(procedure, parameters, commandType: CommandType.StoredProcedure);
+
+                    //return (await connection.ExecuteAsync(query, parameters));
+                }
+            }
+            catch (Exception ex)
+            {
+                throw new Exception(ex.Message, ex);
+            }
+        }
+
+        public async Task<int> UpdateAsync(Product entity)
+        {
+            try
+            {
+                var query = "UPDATE Product SET Name = @Name, Price = @Price, Quantity = @Quantity WHERE Id = @Id";
+
+                var parameters = new DynamicParameters();
+                parameters.Add("Name", entity.Name, DbType.String);
+                parameters.Add("Price", entity.Price, DbType.Decimal);
+                parameters.Add("Quantity", entity.Quantity, DbType.Int32);
+                parameters.Add("Id", entity.Id, DbType.Int32);
+
+                using (var connection = CreateConnection())
+                {
+                    return (await connection.ExecuteAsync(query, parameters));
+                }
+            }
+            catch (Exception ex)
+            {
+                throw new Exception(ex.Message, ex);
+            }
+        }
+
+        public async Task<int> DeleteAsync(Product entity)
+        {
+            try
+            {
+                var query = "DELETE FROM Product WHERE Id = @Id";
+
+                var parameters = new DynamicParameters();
+                parameters.Add("Id", entity.Id, DbType.Int32);
+
+                using (var connection = CreateConnection())
+                {
+                    return (await connection.ExecuteAsync(query, parameters));
+                }
+            }
+            catch (Exception ex)
+            {
+                throw new Exception(ex.Message, ex);
+            }
+        }
+    }
+	
+	11) Add dapper and Microsoft.Data.SqlClient packages 
+	12) inject the interfaces in program.cs 
+	builder.Services.AddScoped<IProductRepository, ProductRepository>();
+builder.Services.AddScoped<IProductService, ProductService>();
+
+13) Create new controller named ProductsController
+ public class ProductsController : Controller
+    {
+        private readonly IProductService _productService;
+
+        public ProductsController(IProductService productService)
+        {
+            _productService = productService;
+        }
+        public async Task<IActionResult> Index()
+        {
+            return View(await _productService.GetAllProducts());
+        }
+        public async Task<IActionResult> Details(int id)
+        {
+            return View(await _productService.GetProductById(id));
+        }
+        public IActionResult Create()
+        {
+            return View();
+        }
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Create(Product product)
+        {
+            try
+            {
+                if (ModelState.IsValid)
+                {
+                    await _productService.CreateProductAsync(product);
+                    return RedirectToAction(nameof(Index));
+                }
+            }
+            catch (Exception ex)
+            {
+                ModelState.AddModelError("", "Unable to save changes.");
+            }
+            return View(product);
+        }
+        public async Task<IActionResult> Edit(int id)
+        {
+            return View(await _productService.GetProductById(id));
+        }
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Edit(int id, Product product)
+        {
+            try
+            {
+                if (ModelState.IsValid)
+                {
+                    var dbProduct = await _productService.GetProductById(id);
+                    if (await TryUpdateModelAsync<Product>(dbProduct))
+                    {
+                        await _productService.UpdateProductAsync(dbProduct);
+                        return RedirectToAction(nameof(Index));
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                ModelState.AddModelError("", "Unable to save changes.");
+            }
+            return View(product);
+        }
+        [HttpGet]
+        public async Task<IActionResult> Delete(int id)
+        {
+            try
+            {
+                var dbProduct = await _productService.GetProductById(id);
+                if (dbProduct != null)
+                {
+                    await _productService.DeleteProductAsync(dbProduct);
+                }
+            }
+            catch (Exception ex)
+            {
+                ModelState.AddModelError("", "Unable to delete. ");
+            }
+
+            return RedirectToAction(nameof(Index));
+        }
+    }
+	
+14) add the respective views 	
+
+list 
+
+@using ServiceLayer.Entities;
+@model IEnumerable<Product>
+ 
+@{
+    ViewData["Title"] = "Index";
+    Layout = "~/Views/Shared/_Layout.cshtml";
+}
+ 
+<div class="row">
+    <div class="col">
+        <h1>Products</h1>
+    </div>
+    <div class="col text-right">
+        <a asp-action="Create" class="btn btn-success">Create New</a>
+    </div>
+</div>
+ 
+<br/>
+<table class="table">
+    <thead>
+        <tr>
+            <th>
+                @Html.DisplayNameFor(model => model.Id)
+            </th>
+            <th>
+                @Html.DisplayNameFor(model => model.Name)
+            </th>
+            <th>
+                @Html.DisplayNameFor(model => model.Price)
+            </th>
+            <th>
+                @Html.DisplayNameFor(model => model.Quantity)
+            </th> 
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var item in Model) {
+            <tr>
+                <td>
+                    @Html.DisplayFor(modelItem => item.Id)
+                </td>
+                <td>
+                    @Html.DisplayFor(modelItem => item.Name)
+                </td>
+                <td>
+                    @Html.DisplayFor(modelItem => item.Price)
+                </td>
+                <td>
+                    @Html.DisplayFor(modelItem => item.Quantity)
+                </td>
+                <td>
+                    @Html.ActionLink("Edit", "Edit", new { id = item.Id }, new { @class = "btn btn-primary" })  
+                    @Html.ActionLink("Details", "Details", new { id=item.Id }, new { @class = "btn btn-secondary" })  
+                    @Html.ActionLink("Delete", "Delete", new { id=item.Id }, new { @class = "btn btn-danger" })
+                </td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+
+ Create 
+ 
+ 
+ @using ServiceLayer.Entities;
+@model Product
+
+@{
+    ViewData["Title"] = "Create";
+    Layout = "~/Views/Shared/_Layout.cshtml";
+}
+
+<h1>Create Product</h1>
+<hr />
+<div class="row">
+    <div class="col-md-4">
+        <form asp-action="Create" method="post">
+            <div class="form-group">
+                <label asp-for="Name" class="control-label"></label>
+                <input asp-for="Name" class="form-control" />
+                <span asp-validation-for="Name" class="text-danger"></span>
+            </div>
+            <div class="form-group">
+                <label asp-for="Price" class="control-label"></label>
+                <input asp-for="Price" class="form-control" />
+                <span asp-validation-for="Price" class="text-danger"></span>
+            </div>
+            <div class="form-group">
+                <label asp-for="Quantity" class="control-label"></label>
+                <input asp-for="Quantity" class="form-control" />
+                <span asp-validation-for="Quantity" class="text-danger"></span>
+            </div>
+            <div class="form-group">
+                <input type="submit" value="Create" class="btn btn-primary" />
+                <a asp-action="Index" class="btn btn-secondary">Back to List</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+ Edit 
+ 
+ @using ServiceLayer.Entities;
+@model Product
+
+@{
+    ViewData["Title"] = "Edit";
+    Layout = "~/Views/Shared/_Layout.cshtml";
+}
+
+<h1>Edit Product</h1>
+
+<hr />
+<div class="row">
+    <div class="col-md-4">
+        <form asp-action="Edit" method="post">
+            <input asp-for="Id" class="form-control" type="hidden" />
+            <div class="form-group">
+                <label asp-for="Name" class="control-label"></label>
+                <input asp-for="Name" class="form-control" />
+                <span asp-validation-for="Name" class="text-danger"></span>
+            </div>
+            <div class="form-group">
+                <label asp-for="Price" class="control-label"></label>
+                <input asp-for="Price" class="form-control" />
+                <span asp-validation-for="Price" class="text-danger"></span>
+            </div>
+            <div class="form-group">
+                <label asp-for="Quantity" class="control-label"></label>
+                <input asp-for="Quantity" class="form-control" />
+                <span asp-validation-for="Quantity" class="text-danger"></span>
+            </div>
+            <div class="form-group">
+                <input type="submit" value="Save" class="btn btn-primary" />
+                <a asp-action="Index" class="btn btn-secondary">Back to List</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+
+Details 
+
+@using ServiceLayer.Entities;
+@model Product
+
+@{
+    ViewData["Title"] = "Details";
+    Layout = "~/Views/Shared/_Layout.cshtml";
+}
+
+<h1>@Model.Name</h1>
+<hr />
+<div>
+
+    <dl class="row">
+        <dt class="col-sm-2">
+            @Html.DisplayNameFor(model => model.Id)
+        </dt>
+        <dd class="col-sm-10">
+            @Html.DisplayFor(model => model.Id)
+        </dd>
+        <dt class="col-sm-2">
+            @Html.DisplayNameFor(model => model.Name)
+        </dt>
+        <dd class="col-sm-10">
+            @Html.DisplayFor(model => model.Name)
+        </dd>
+        <dt class="col-sm-2">
+            @Html.DisplayNameFor(model => model.Price)
+        </dt>
+        <dd class="col-sm-10">
+            @Html.DisplayFor(model => model.Price)
+        </dd>
+        <dt class="col-sm-2">
+            @Html.DisplayNameFor(model => model.Quantity)
+        </dt>
+        <dd class="col-sm-10">
+            @Html.DisplayFor(model => model.Quantity)
+        </dd>
+    </dl>
+</div>
+<div>
+    @Html.ActionLink("Edit", "Edit", new { id = Model.Id }, new { @class = "btn btn-primary" })
+    <a asp-action="Index" class="btn btn-secondary">Back to List</a>
+</div>
+
+add connection strring in appsettings
+  "ConnectionStrings": {
+    "DefaultConnection": "Data Source=(localdb)\\ProjectsV13;Initial Catalog=Test;Integrated Security=True"
+  }
+  
+  add project reference in DapperDemo of ServiceLayer 
+  
+  
+  
+  Create sp 
+  
+  ALTER   PROCEDURE [dbo].[spGetAllProducts]
+    (
+	@Flag nvarchar(20),
+	@Name nvarchar(200)= null,
+	 @Price decimal(18,2)= null,
+	  @Quantity int =null
+	)
+AS
+BEGIN
+  SET NOCOUNT ON;
+ 
+ if(@Flag='l')
+ begin
+  SELECT * 
+  FROM Product
+ end
+ if(@Flag='i')
+ begin
+  INSERT INTO Product ([Name], Price, Quantity) VALUES (@Name, @Price, @Quantity)
+ end
+END
+
+
+Create table 
+
+CREATE TABLE [dbo].[Product](
+	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[Name] [varchar](255) NOT NULL,
+	[Price] [decimal](18, 2) NULL,
+	[Quantity] [int] NULL
+) ON [PRIMARY]
+
+GO
+
+
+refererence link is 
+https://www.ezzylearning.net/tutorial/crud-operations-in-asp-net-core-5-using-dapper-orm
